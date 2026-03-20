@@ -1,0 +1,5 @@
+# Ignore all other projects at this level
+RAG-SaaS/
+url-shortener/
+ML-project/
+*.md

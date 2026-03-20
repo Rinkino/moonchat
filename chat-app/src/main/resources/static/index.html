@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Chat App</title>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f2f5; height: 100vh; display: flex; align-items: center; justify-content: center; }
+
+    /* AUTH */
+    #auth-screen { background: white; border-radius: 12px; padding: 40px; width: 360px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+    #auth-screen h1 { font-size: 22px; margin-bottom: 6px; color: #111; }
+    #auth-screen p { font-size: 13px; color: #888; margin-bottom: 24px; }
+    .tab-row { display: flex; gap: 8px; margin-bottom: 20px; }
+    .tab { flex: 1; padding: 8px; border: 1px solid #ddd; background: white; border-radius: 8px; cursor: pointer; font-size: 14px; color: #555; }
+    .tab.active { background: #4f46e5; color: white; border-color: #4f46e5; }
+    input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; margin-bottom: 12px; outline: none; }
+    input:focus { border-color: #4f46e5; }
+    .btn-primary { width: 100%; padding: 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; font-weight: 500; }
+    .btn-primary:hover { background: #4338ca; }
+    #auth-msg { margin-top: 12px; font-size: 13px; text-align: center; }
+    #auth-msg.error { color: #dc2626; }
+    #auth-msg.success { color: #16a34a; }
+
+    /* CHAT LAYOUT */
+    #chat-screen { display: none; width: 860px; height: 580px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; flex-direction: row; }
+
+    /* SIDEBAR */
+    #sidebar { width: 260px; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; background: #fafafa; }
+    #sidebar-top { padding: 14px 16px; border-bottom: 1px solid #e5e7eb; }
+    #sidebar-top .me { font-weight: 700; font-size: 15px; color: #111; }
+    #sidebar-top .me-label { font-size: 11px; color: #888; margin-bottom: 2px; }
+    #search-wrap { margin-top: 10px; position: relative; }
+    #search-wrap input { margin: 0; padding: 7px 10px 7px 30px; font-size: 13px; border-radius: 8px; }
+    #search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #aaa; font-size: 13px; pointer-events: none; }
+    #user-list { flex: 1; overflow-y: auto; }
+    .section-label { padding: 8px 16px 4px; font-size: 10px; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+    .user-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
+    .user-item:hover { background: #f0f0f0; }
+    .user-item.active { background: #eef2ff; }
+    .avatar { width: 34px; height: 34px; border-radius: 50%; background: #4f46e5; color: white; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+    .user-info { flex: 1; min-width: 0; }
+    .user-name { font-size: 14px; font-weight: 500; color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .user-preview { font-size: 12px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .unread-badge { background: #4f46e5; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    #sidebar-bottom { padding: 10px 16px; border-top: 1px solid #e5e7eb; }
+    #logout-btn { width: 100%; padding: 8px; font-size: 13px; color: #dc2626; cursor: pointer; border: 1px solid #fecaca; border-radius: 8px; background: white; }
+    #logout-btn:hover { background: #fef2f2; }
+
+    /* CHAT MAIN */
+    #chat-main { flex: 1; display: flex; flex-direction: column; }
+    #chat-header { padding: 14px 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 10px; }
+    #chat-header .avatar-lg { width: 38px; height: 38px; border-radius: 50%; background: #4f46e5; color: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; }
+    #chat-header-name { font-weight: 600; font-size: 15px; color: #111; }
+    #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 6px; background: #f9fafb; }
+    #chat-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #bbb; font-size: 14px; gap: 8px; }
+    #chat-placeholder svg { opacity: 0.3; }
+    .msg { max-width: 62%; padding: 9px 13px; border-radius: 16px; font-size: 14px; line-height: 1.45; word-break: break-word; }
+    .msg.sent { background: #4f46e5; color: white; align-self: flex-end; border-bottom-right-radius: 3px; }
+    .msg.received { background: white; color: #111; align-self: flex-start; border-bottom-left-radius: 3px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+    .msg .time { font-size: 10px; margin-top: 3px; opacity: 0.6; }
+    .day-label { text-align: center; font-size: 11px; color: #aaa; margin: 6px 0; }
+    #input-row { padding: 12px 16px; border-top: 1px solid #e5e7eb; display: flex; gap: 8px; background: white; }
+    #msg-input { flex: 1; padding: 10px 14px; border: 1px solid #e5e7eb; border-radius: 22px; font-size: 14px; outline: none; background: #f9fafb; }
+    #msg-input:focus { border-color: #4f46e5; background: white; }
+    #send-btn { padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 22px; font-size: 14px; cursor: pointer; font-weight: 500; }
+    #send-btn:hover { background: #4338ca; }
+    #send-btn:disabled { background: #c7d2fe; cursor: default; }
+  </style>
+</head>
+<body>
+
+<!-- AUTH -->
+<div id="auth-screen">
+  <h1>Chat App</h1>
+  <p>Sign in or create an account to start chatting</p>
+  <div class="tab-row">
+    <button class="tab active" onclick="switchTab('login')">Login</button>
+    <button class="tab" onclick="switchTab('signup')">Sign Up</button>
+  </div>
+  <input type="text" id="auth-username" placeholder="Username" onkeydown="if(event.key==='Enter')document.getElementById('auth-password').focus()" />
+  <input type="password" id="auth-password" placeholder="Password" onkeydown="if(event.key==='Enter')submitAuth()" />
+  <button class="btn-primary" onclick="submitAuth()">Continue</button>
+  <div id="auth-msg"></div>
+</div>
+
+<!-- CHAT -->
+<div id="chat-screen">
+  <div id="sidebar">
+    <div id="sidebar-top">
+      <div class="me-label">Logged in as</div>
+      <div class="me" id="my-username-label"></div>
+      <div id="search-wrap">
+        <span id="search-icon">&#128269;</span>
+        <input type="text" id="search-input" placeholder="Search users..." oninput="filterUsers()" />
+      </div>
+    </div>
+    <div id="user-list"></div>
+    <div id="sidebar-bottom">
+      <button id="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div id="chat-main">
+    <div id="chat-header">
+      <div id="chat-placeholder" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#bbb;font-size:14px;gap:8px;padding:20px;">
+        Select a conversation to start chatting
+      </div>
+    </div>
+    <div id="messages" style="display:none;"></div>
+    <div id="input-row" style="display:none;">
+      <input id="msg-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage()" />
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const BASE = 'http://localhost:8080';
+  let token = null;
+  let myUsername = null;
+  let stompClient = null;
+  let currentChat = null;
+  // { username -> { unread: 0, lastMsg: '' } }
+  const userMeta = {};
+
+  // ---- AUTH ----
+  let authMode = 'login';
+  function switchTab(mode) {
+    authMode = mode;
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', (i === 0 && mode === 'login') || (i === 1 && mode === 'signup'));
+    });
+    setAuthMsg('', '');
+  }
+  function setAuthMsg(msg, type) {
+    const el = document.getElementById('auth-msg');
+    el.textContent = msg;
+    el.className = type;
+  }
+  async function submitAuth() {
+    const username = document.getElementById('auth-username').value.trim();
+    const password = document.getElementById('auth-password').value.trim();
+    if (!username || !password) { setAuthMsg('Please fill in both fields.', 'error'); return; }
+    const endpoint = authMode === 'login' ? '/auth/login' : '/auth/signup';
+    try {
+      const res = await fetch(BASE + endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok) { setAuthMsg(data.message || 'Something went wrong.', 'error'); return; }
+      if (authMode === 'signup') {
+        setAuthMsg('Account created! You can now log in.', 'success');
+        switchTab('login');
+        return;
+      }
+      token = data.token;
+      myUsername = username;
+      document.getElementById('my-username-label').textContent = myUsername;
+      showChatScreen();
+    } catch (e) {
+      setAuthMsg('Cannot reach server. Is the backend running?', 'error');
+    }
+  }
+
+  // ---- CHAT SCREEN ----
+  async function showChatScreen() {
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('chat-screen').style.display = 'flex';
+    await loadAllUsers();
+    connectWebSocket();
+  }
+
+  function logout() {
+    if (stompClient) stompClient.disconnect();
+    token = null; myUsername = null; currentChat = null;
+    Object.keys(userMeta).forEach(k => delete userMeta[k]);
+    document.getElementById('auth-screen').style.display = '';
+    document.getElementById('chat-screen').style.display = 'none';
+    document.getElementById('user-list').innerHTML = '';
+    document.getElementById('messages').innerHTML = '';
+    document.getElementById('messages').style.display = 'none';
+    document.getElementById('input-row').style.display = 'none';
+    document.getElementById('chat-header').innerHTML = '<div id="chat-placeholder" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#bbb;font-size:14px;gap:8px;padding:20px;">Select a conversation to start chatting</div>';
+    document.getElementById('auth-username').value = '';
+    document.getElementById('auth-password').value = '';
+    setAuthMsg('', '');
+  }
+
+  // ---- LOAD ALL USERS ----
+  async function loadAllUsers() {
+    try {
+      const res = await fetch(BASE + '/chat/users', { headers: { Authorization: 'Bearer ' + token } });
+      const users = await res.json();
+      users.forEach(u => {
+        if (!userMeta[u]) userMeta[u] = { unread: 0, lastMsg: '' };
+      });
+      renderUserList();
+    } catch (e) { console.error('Failed to load users', e); }
+  }
+
+  // ---- RENDER SIDEBAR ----
+  function renderUserList() {
+    const query = (document.getElementById('search-input').value || '').toLowerCase();
+    const list = document.getElementById('user-list');
+    list.innerHTML = '';
+
+    const allUsers = Object.keys(userMeta);
+    const withHistory = [];
+    const others = [];
+
+    // Separate: users with a lastMsg vs clean
+    allUsers.forEach(u => {
+      if (userMeta[u].lastMsg) withHistory.push(u);
+      else others.push(u);
+    });
+
+    const filtered = (arr) => query ? arr.filter(u => u.toLowerCase().includes(query)) : arr;
+
+    if (filtered(withHistory).length) {
+      const lbl = document.createElement('div');
+      lbl.className = 'section-label';
+      lbl.textContent = 'Recent';
+      list.appendChild(lbl);
+      filtered(withHistory).forEach(u => list.appendChild(buildUserItem(u)));
+    }
+
+    if (filtered(others).length) {
+      const lbl = document.createElement('div');
+      lbl.className = 'section-label';
+      lbl.textContent = 'All Users';
+      list.appendChild(lbl);
+      filtered(others).forEach(u => list.appendChild(buildUserItem(u)));
+    }
+  }
+
+  function buildUserItem(username) {
+    const meta = userMeta[username];
+    const div = document.createElement('div');
+    div.className = 'user-item' + (username === currentChat ? ' active' : '');
+    div.id = 'user-item-' + username;
+    div.onclick = () => selectChat(username);
+
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.textContent = username[0].toUpperCase();
+    av.style.background = colorFor(username);
+
+    const info = document.createElement('div');
+    info.className = 'user-info';
+
+    const name = document.createElement('div');
+    name.className = 'user-name';
+    name.textContent = username;
+
+    const preview = document.createElement('div');
+    preview.className = 'user-preview';
+    preview.textContent = meta.lastMsg || '';
+
+    info.appendChild(name);
+    info.appendChild(preview);
+    div.appendChild(av);
+    div.appendChild(info);
+
+    if (meta.unread > 0) {
+      const badge = document.createElement('div');
+      badge.className = 'unread-badge';
+      badge.textContent = meta.unread;
+      div.appendChild(badge);
+    }
+
+    return div;
+  }
+
+  function filterUsers() { renderUserList(); }
+
+  function colorFor(name) {
+    const colors = ['#4f46e5','#0891b2','#059669','#d97706','#dc2626','#7c3aed','#db2777'];
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % colors.length;
+    return colors[Math.abs(h)];
+  }
+
+  // ---- SELECT CHAT ----
+  async function selectChat(username) {
+    currentChat = username;
+    if (!userMeta[username]) userMeta[username] = { unread: 0, lastMsg: '' };
+    userMeta[username].unread = 0;
+
+    // Show header
+    document.getElementById('chat-header').innerHTML = `
+      <div class="avatar-lg" style="background:${colorFor(username)}">${username[0].toUpperCase()}</div>
+      <div id="chat-header-name">${username}</div>`;
+    document.getElementById('messages').style.display = 'flex';
+    document.getElementById('messages').innerHTML = '';
+    document.getElementById('input-row').style.display = 'flex';
+    document.getElementById('msg-input').focus();
+
+    renderUserList();
+    await loadHistory(username);
+  }
+
+  // ---- LOAD HISTORY ----
+  async function loadHistory(username) {
+    try {
+      const res = await fetch(BASE + '/chat/history/' + username, {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      const msgs = await res.json();
+      const messagesEl = document.getElementById('messages');
+      messagesEl.innerHTML = '';
+      let lastDay = null;
+      msgs.forEach(m => {
+        const sentAt = m.sentAt;
+        const d = Array.isArray(sentAt)
+          ? new Date(sentAt[0], sentAt[1]-1, sentAt[2], sentAt[3], sentAt[4], sentAt[5])
+          : new Date(sentAt);
+        const dayStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+        if (dayStr !== lastDay) {
+          const lbl = document.createElement('div');
+          lbl.className = 'day-label';
+          lbl.textContent = dayStr;
+          messagesEl.appendChild(lbl);
+          lastDay = dayStr;
+        }
+        const type = m.sender === myUsername ? 'sent' : 'received';
+        appendMessage(m.message, type, sentAt);
+      });
+      if (msgs.length && userMeta[username]) {
+        userMeta[username].lastMsg = msgs[msgs.length - 1].message;
+        renderUserList();
+      }
+    } catch (e) { console.error('History load failed', e); }
+  }
+
+  // ---- WEBSOCKET ----
+  function connectWebSocket() {
+    const sock = new SockJS(BASE + '/ws?token=' + token);
+    stompClient = Stomp.over(sock);
+    stompClient.debug = null;
+    stompClient.connect({ Authorization: 'Bearer ' + token }, () => {
+      stompClient.subscribe('/user/queue/messages', (frame) => {
+        handleIncoming(JSON.parse(frame.body));
+      });
+    }, (err) => console.error('WS error', err));
+  }
+
+  function handleIncoming(msg) {
+    const sender = msg.sender;
+    if (!userMeta[sender]) userMeta[sender] = { unread: 0, lastMsg: '' };
+    userMeta[sender].lastMsg = msg.message;
+    if (currentChat === sender) {
+      appendMessage(msg.message, 'received', msg.sentAt);
+    } else {
+      userMeta[sender].unread++;
+    }
+    renderUserList();
+  }
+
+  // ---- SEND ----
+  function sendMessage() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text || !currentChat || !stompClient) return;
+    input.value = '';
+    stompClient.send('/app/chat', {}, JSON.stringify({ recipientUsername: currentChat, content: text }));
+    if (userMeta[currentChat]) userMeta[currentChat].lastMsg = text;
+    appendMessage(text, 'sent', new Date().toISOString());
+    renderUserList();
+  }
+
+  // ---- RENDER MESSAGE ----
+  function appendMessage(text, type, rawTime) {
+    const messages = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = 'msg ' + type;
+
+    const p = document.createElement('div');
+    p.textContent = text;
+
+    const t = document.createElement('div');
+    t.className = 'time';
+    if (rawTime) {
+      const d = Array.isArray(rawTime)
+        ? new Date(rawTime[0], rawTime[1]-1, rawTime[2], rawTime[3], rawTime[4], rawTime[5])
+        : new Date(rawTime);
+      t.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    div.appendChild(p);
+    div.appendChild(t);
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+</script>
+</body>
+</html>
